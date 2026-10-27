@@ -274,16 +274,15 @@ export function parseMedicaoWorkbook(arrayBuffer, tx20Map = null) {
 }
 
 /**
- * Atualiza e exporta a planilha respondida mantendo fórmulas e abas intactas
+ * Atualiza e exporta a planilha respondida mantendo fórmulas e criando abas novas dedicadas com cores
  * @param {any} originalWorkbook 
  * @param {Array<object>} updatedRides 
  * @param {string} originalFileName 
  */
 export function exportUpdatedWorkbook(originalWorkbook, updatedRides, originalFileName) {
-  // Clona o workbook para edição
   const wb = originalWorkbook;
 
-  // Agrupa as alterações por aba
+  // 1. Atualiza as abas originais existentes
   const ridesBySheet = {};
   updatedRides.forEach(r => {
     if (!ridesBySheet[r.sheetName]) {
@@ -296,33 +295,18 @@ export function exportUpdatedWorkbook(originalWorkbook, updatedRides, originalFi
     const ws = wb.Sheets[sheetName];
     if (!ws) continue;
 
-    // Encontra os índices das colunas "Justificativa da Empresa" e "PAGAMENTO"
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:Z100');
     let justColLetter = null;
     let pagtoColLetter = null;
 
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
-      const cell = ws[cellAddress];
-      if (!cell || !cell.v) continue;
-
-      const headerVal = String(cell.v).trim().toLowerCase();
-      if (headerVal === 'justificativa da empresa' || headerVal === 'justificar da empresa') {
-        justColLetter = XLSX.utils.encode_col(C);
-      }
-      if (headerVal === 'pagamento') {
-        pagtoColLetter = XLSX.utils.encode_col(C);
-      }
-    }
-
-    // Se não encontrou no cabeçalho exato, tenta linha 1
-    if (!justColLetter) {
+    for (let r = 0; r <= Math.min(2, range.e.r); r++) {
       for (let C = range.s.c; C <= range.e.c; C++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: 1, c: C });
+        const cellAddress = XLSX.utils.encode_cell({ r, c: C });
         const cell = ws[cellAddress];
         if (!cell || !cell.v) continue;
+
         const headerVal = String(cell.v).trim().toLowerCase();
-        if (headerVal.includes('justificativa da empresa')) {
+        if (headerVal === 'justificativa da empresa' || headerVal === 'justificar da empresa') {
           justColLetter = XLSX.utils.encode_col(C);
         }
         if (headerVal === 'pagamento') {
@@ -333,23 +317,85 @@ export function exportUpdatedWorkbook(originalWorkbook, updatedRides, originalFi
 
     sheetRides.forEach(ride => {
       const rowNum = ride.rowIndex;
-      
       if (justColLetter) {
-        const justCellRef = `${justColLetter}${rowNum}`;
-        ws[justCellRef] = { t: 's', v: ride.currentJustification || '' };
+        ws[`${justColLetter}${rowNum}`] = { t: 's', v: ride.currentJustification || '' };
       }
       if (pagtoColLetter) {
-        const pagtoCellRef = `${pagtoColLetter}${rowNum}`;
-        ws[pagtoCellRef] = { t: 's', v: ride.pagamento || 'LIBERADO PAGAMENTO' };
+        ws[`${pagtoColLetter}${rowNum}`] = { t: 's', v: ride.pagamento || 'LIBERADO PAGAMENTO' };
       }
     });
   }
 
-  // Gera o arquivo final em ArrayBuffer
+  // 2. Criar Novas Abas Dedicadas de Resposta formatadas com cores
+  const mobRides = updatedRides.filter(r => r.system === 'MOBICITY');
+  const simRides = updatedRides.filter(r => r.system === 'SIMCORPI');
+
+  if (mobRides.length > 0) {
+    const mobRows = mobRides.map(r => ({
+      'eVoucher': r.evoucher,
+      'Validação Apoio': r.validacaoApoio || r.validacaoAnalista,
+      'Justificativa da Empresa': r.currentJustification || '',
+      'PAGAMENTO': r.pagamento || 'LIBERADO PAGAMENTO',
+      'Cidade Origem': r.cidadeOrigem,
+      'Origem': r.origem,
+      'Cidade Destino': r.cidadeDestino,
+      'Destino': r.destino,
+      'KM Real': r.kmReal,
+      'KM Estimado': r.kmEstimado,
+      'Valor Cobrado': r.valorTotal,
+      'Valor Orçado': r.valorEstimado,
+      'Passageiro': r.passageiro,
+      'Motorista': r.motorista,
+      'Placa': r.placa
+    }));
+
+    const wsMobResp = XLSX.utils.json_to_sheet(mobRows);
+    wsMobResp['!tabColor'] = { rgb: '00B0F0' }; // Cyan estilo Petrobras
+    
+    // Remove se já existia e adiciona
+    const newMobSheetName = 'RESPOSTA MOBICITY';
+    if (wb.SheetNames.includes(newMobSheetName)) {
+      wb.Sheets[newMobSheetName] = wsMobResp;
+    } else {
+      XLSX.utils.book_append_sheet(wb, wsMobResp, newMobSheetName);
+    }
+  }
+
+  if (simRides.length > 0) {
+    const simRows = simRides.map(r => ({
+      'QRU': r.qru,
+      'eVoucher': r.evoucher,
+      'Validação Do Analista': r.validacaoAnalista || r.validacaoApoio,
+      'Justificativa da Empresa': r.currentJustification || '',
+      'PAGAMENTO': r.pagamento || 'LIBERADO PAGAMENTO',
+      'Cidade Origem': r.cidadeOrigem,
+      'Origem': r.origem,
+      'Cidade Destino': r.cidadeDestino,
+      'Destino': r.destino,
+      'KM Real': r.kmReal,
+      'KM Estimado': r.kmEstimado,
+      'Valor Cobrado': r.valorTotal,
+      'Valor Estimado': r.valorEstimado,
+      'Passageiro': r.passageiro,
+      'Motorista': r.motorista,
+      'Placa': r.placa
+    }));
+
+    const wsSimResp = XLSX.utils.json_to_sheet(simRows);
+    wsSimResp['!tabColor'] = { rgb: '00B0F0' }; // Cyan estilo Petrobras
+
+    const newSimSheetName = 'RESPOSTA SIMCORPI';
+    if (wb.SheetNames.includes(newSimSheetName)) {
+      wb.Sheets[newSimSheetName] = wsSimResp;
+    } else {
+      XLSX.utils.book_append_sheet(wb, wsSimResp, newSimSheetName);
+    }
+  }
+
+  // 3. Exporta arquivo final
   const outBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([outBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 
-  // Dispara o download
   const cleanName = (originalFileName || 'Medicao_Petrobras').replace(/\.xlsx$/i, '');
   const downloadUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');

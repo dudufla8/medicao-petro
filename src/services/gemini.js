@@ -1,9 +1,21 @@
-// Integração direta com Google Gemini API para Enriquecimento de Justificativas
+// Integração com Google Gemini API para Auditoria e Enriquecimento Estrito de Justificativas
 
 const DEFAULT_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
 
+const SYSTEM_INSTRUCTION = `Você é um auditor e assistente técnico especializado em faturamento de transporte corporativo.
+REQUISITO CRÍTICO DE CONFORMIDADE:
+- NUNCA invente acontecimentos, motivos externos, obras, condições climáticas ou acidentes a menos que tais fatos estejam explicitamente descritos nos dados brutos fornecidos.
+- Toda resposta deve ser 100% comprovável através do cruzamento estrito dos dados fornecidos:
+  * Valor cobrado vs Valor orçado.
+  * KM percorrido real vs KM estimado.
+  * Tempo de viagem e horários registrados.
+  * Registro original deixado pelo motorista no sistema.
+- Se o motivo fornecido for insuficiente, sua função é apenas formalizar a redação técnica dentro das cláusulas contratuais aplicáveis (ex: cobrança baseada no trajeto via taxímetro eletrônico homologado / cobrança de quilometragem rodada aferida), sem presumir fatos não comprovados.
+- Responda sempre em Português do Brasil com tom formal, conciso e jurídico-administrativo.
+- Retorne APENAS o texto final da justificativa (1 a 2 frases), sem aspas, sem introduções do tipo "Aqui está" ou saudações.`;
+
 /**
- * Envia os dados da corrida para o Gemini reescrever ou gerar a justificativa ideal
+ * Envia os dados estruturados da corrida para o Gemini com regras estritas anti-alucinação
  * @param {object} ride Dados da corrida
  * @param {string} customApiKey Chave opcional configurada pelo usuário
  * @returns {Promise<string>}
@@ -15,35 +27,26 @@ export async function generateGeminiJustification(ride, customApiKey) {
     throw new Error("Chave da API Gemini não configurada.");
   }
 
-  // Dados de contexto
-  const analista = ride.validacaoAnalista || ride.validacaoApoio || 'Justificar divergência de valor ou rota';
-  const origem = `${ride.cidadeOrigem || ''} - ${ride.origem || ride.logradouroOrigem || ''}`.trim();
-  const destino = `${ride.cidadeDestino || ''} - ${ride.destino || ride.logradouroDestino || ''}`.trim();
-  const passageiro = ride.passageiro || ride.usuario || 'Passageiro Petrobras';
-  const kmReal = ride.kmReal || ride.kmRealizado || '';
-  const kmEst = ride.kmEstimado || ride.kmOrcado || '';
-  const rascunhoMotorista = ride.rawJustification || '';
-  const obsMoto = ride.obsMoto || '';
+  // Payload estruturado exatamente como solicitado
+  const payload = {
+    voucher: String(ride.evoucher || ride.qru || ''),
+    motivo_glosa_fiscal: String(ride.validacaoAnalista || ride.validacaoApoio || ''),
+    origem: `${ride.cidadeOrigem ? ride.cidadeOrigem + ' - ' : ''}${ride.origem || ''}`.trim() || 'Não informada',
+    destino: `${ride.cidadeDestino ? ride.cidadeDestino + ' - ' : ''}${ride.destino || ''}`.trim() || 'Não informada',
+    km_estimado: String(ride.kmEstimado || '0'),
+    km_real: String(ride.kmReal || '0'),
+    valor_estimado: String(ride.valorEstimado || '0'),
+    valor_cobrado: String(ride.valorTotal || '0'),
+    registro_motorista: String(ride.rawJustification || ride.obsMoto || 'Sem observação prévia registrada.')
+  };
 
-  const prompt = `Você é um especialista em conciliação de contratos de transporte corporativo da Petrobras.
-Reescreva ou crie uma justificativa formal, técnica, direta e profissional (em 1 ou 2 frases curtas) para responder ao apontamento do analista da Petrobras.
+  const userPrompt = `${SYSTEM_INSTRUCTION}
 
-DADOS DA CORRIDA:
-- Apontamento do Analista: "${analista}"
-- Origem: ${origem || 'Não informada'}
-- Destino: ${destino || 'Não informada'}
-- Passageiro: ${passageiro}
-- Quilometragem: Real ${kmReal} km | Estimado ${kmEst} km
-- Relato do Motorista / Sistema: "${rascunhoMotorista}"
-- Observações do Sistema: "${obsMoto}"
+Analise os dados da corrida e elabore a justificativa técnica estrita para contestação do apontamento:
 
-DIRETRIZES OBRIGATÓRIAS:
-1. Retorne APENAS o texto da justificativa final, sem saudações, sem aspas, sem introdução como "Aqui está".
-2. Seja objetivo, formal e mencione vias/rodovias/portarias plausíveis (ex: anel viário, rodovia, portaria de segurança, vias expressas, retenção de tráfego) e alinhamento com o passageiro.
-3. Se o apontamento for sobre desembarque diferente ou portaria, justifique que o desembarque ocorreu na portaria/posto de vigilância (PV) por exigência de acesso.
-4. Se o apontamento for sobre cancelamento, informe formalmente que a corrida foi cancelada e não integra o faturamento da medição.`;
+DADOS BRUTOS DA CORRIDA (JSON):
+${JSON.stringify(payload, null, 2)}`;
 
-  // Testamos com gemini-3-flash-preview e fallback para gemini-flash-latest
   const models = ["gemini-3-flash-preview", "gemini-flash-latest"];
   
   let lastError = null;
@@ -58,11 +61,11 @@ DIRETRIZES OBRIGATÓRIAS:
         body: JSON.stringify({
           contents: [
             {
-              parts: [{ text: prompt }]
+              parts: [{ text: userPrompt }]
             }
           ],
           generationConfig: {
-            temperature: 0.3,
+            temperature: 0.1, // Temperatura baixa para máxima fidelidade aos dados
             maxOutputTokens: 200
           }
         })
@@ -80,7 +83,6 @@ DIRETRIZES OBRIGATÓRIAS:
       }
     } catch (err) {
       lastError = err;
-      // tenta o próximo modelo
     }
   }
 
