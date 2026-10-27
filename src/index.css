@@ -113,6 +113,13 @@ body {
   gap: 16px;
 }
 
+.brand-logo-img {
+  height: 48px;
+  width: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.06));
+}
+
 .brand-logo-icon {
   width: 44px;
   height: 44px;

@@ -238,9 +238,7 @@ export default function App() {
       {/* Header Superior Corporativo B2B */}
       <header className="app-header">
         <div className="brand-wrapper">
-          <div className="brand-logo-icon">
-            <Car size={24} />
-          </div>
+          <img src="./logo.png" alt="Táxi 2.0" className="brand-logo-img" />
           <div className="brand-titles">
             <h1>
               Táxi 2.0 <span className="brand-badge">Petrobras • Medição B2B</span>
