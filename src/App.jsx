@@ -13,10 +13,13 @@ import {
   Car, 
   ShieldAlert, 
   Check, 
-  Copy,
-  Database,
-  X,
-  Clock,
+  Copy, 
+  Database, 
+  X, 
+  RotateCcw,
+  ListTodo,
+  CheckCheck,
+  Zap,
   ArrowRight
 } from 'lucide-react';
 import { parseSistemaTX20, parseMedicaoWorkbook, exportUpdatedWorkbook } from './services/excelProcessor';
@@ -31,9 +34,10 @@ export default function App() {
   const [medicaoFileName, setMedicaoFileName] = useState('');
   const [rides, setRides] = useState([]);
   
-  // Estados de Interface
+  // Estados de Interface e Fila de Trabalho
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
+  const [queueTab, setQueueTab] = useState('pending'); // 'pending' | 'completed' | 'all'
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -111,6 +115,7 @@ export default function App() {
       setMedicaoWb(parsed.workbook);
       setMedicaoFileName(file.name);
       setRides(parsed.rides);
+      setQueueTab('pending'); // Volta automaticamente para a fila de trabalho
     } catch (err) {
       console.error(err);
       alert('Erro ao processar planilha de medição: ' + err.message);
@@ -128,6 +133,36 @@ export default function App() {
           currentJustification: text,
           quality: evaluateJustificationQuality(text)
         };
+      }
+      return r;
+    }));
+  };
+
+  // Marcar Corrida como Concluída / Validada ou Reabrir
+  const handleToggleComplete = (rideId) => {
+    setRides(prev => prev.map(r => {
+      if (r.id === rideId) {
+        const nextCompleted = !r.isCompleted;
+        return {
+          ...r,
+          isCompleted: nextCompleted,
+          pagamento: nextCompleted ? 'LIBERADO PAGAMENTO' : r.pagamento
+        };
+      }
+      return r;
+    }));
+  };
+
+  // Ação em Lote: Aprovar e Arquivar todas com Padrão Aprovado (Forte)
+  const handleBulkApproveStrong = () => {
+    const readyCount = rides.filter(r => !r.isCompleted && r.quality?.score === 'strong').length;
+    if (readyCount === 0) {
+      alert('Nenhuma corrida pendente com padrão forte para aprovar em lote.');
+      return;
+    }
+    setRides(prev => prev.map(r => {
+      if (!r.isCompleted && r.quality?.score === 'strong') {
+        return { ...r, isCompleted: true, pagamento: 'LIBERADO PAGAMENTO' };
       }
       return r;
     }));
@@ -205,24 +240,45 @@ export default function App() {
   // Métricas e KPIs
   const stats = useMemo(() => {
     const total = rides.length;
+    const completedCount = rides.filter(r => r.isCompleted).length;
+    const pendingCount = total - completedCount;
     const manualCount = rides.filter(r => r.manualCheck?.isManual).length;
     const strongCount = rides.filter(r => r.quality?.score === 'strong').length;
     const mediumCount = rides.filter(r => r.quality?.score === 'medium').length;
     const weakCount = rides.filter(r => r.quality?.score === 'weak').length;
     const autoFilledCount = rides.filter(r => r.isAutoFilled).length;
+    const progressPercent = total > 0 ? Math.round((completedCount / total) * 100) : 0;
+    const readyStrongPendingCount = rides.filter(r => !r.isCompleted && r.quality?.score === 'strong').length;
 
-    return { total, manualCount, strongCount, mediumCount, weakCount, autoFilledCount };
+    return { 
+      total, 
+      completedCount, 
+      pendingCount, 
+      manualCount, 
+      strongCount, 
+      mediumCount, 
+      weakCount, 
+      autoFilledCount,
+      progressPercent,
+      readyStrongPendingCount
+    };
   }, [rides]);
 
-  // Lista Filtrada
+  // Lista Filtrada com Suporte a Fila de Pendências
   const filteredRides = useMemo(() => {
     return rides.filter(r => {
+      // Filtro primário da fila de trabalho
+      if (queueTab === 'pending' && r.isCompleted) return false;
+      if (queueTab === 'completed' && !r.isCompleted) return false;
+
+      // Filtros secundários
       if (activeFilter === 'manual' && !r.manualCheck?.isManual) return false;
       if (activeFilter === 'weak' && r.quality?.score !== 'weak') return false;
       if (activeFilter === 'strong' && r.quality?.score !== 'strong') return false;
       if (activeFilter === 'mobicity' && r.system !== 'MOBICITY') return false;
       if (activeFilter === 'simcorpi' && r.system !== 'SIMCORPI') return false;
 
+      // Busca textual
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const fullText = `${r.evoucher} ${r.qru} ${r.passageiro} ${r.motorista} ${r.placa} ${r.cidadeOrigem} ${r.cidadeDestino} ${r.validacaoAnalista} ${r.currentJustification}`.toLowerCase();
@@ -231,7 +287,7 @@ export default function App() {
 
       return true;
     });
-  }, [rides, activeFilter, searchQuery]);
+  }, [rides, queueTab, activeFilter, searchQuery]);
 
   return (
     <div className="app-container">
@@ -352,9 +408,29 @@ export default function App() {
         </div>
       )}
 
-      {/* KPIs / Sumário Executivo */}
+      {/* Conteúdo Principal pós-carregamento */}
       {rides.length > 0 && (
         <>
+          {/* Card de Progresso da Conciliação */}
+          <div className="progress-card">
+            <div className="progress-header">
+              <div className="progress-title">
+                <CheckCheck size={18} style={{ color: '#10b981' }} />
+                <span>Progresso da Validação da Medição</span>
+              </div>
+              <div className="progress-stats-text">
+                <strong>{stats.completedCount}</strong> de {stats.total} corridas concluídas ({stats.progressPercent}%) • <span style={{ color: '#b45309' }}>{stats.pendingCount} na fila</span>
+              </div>
+            </div>
+            <div className="progress-bar-track">
+              <div 
+                className="progress-bar-indicator" 
+                style={{ width: `${stats.progressPercent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* KPIs / Sumário Executivo */}
           <div className="kpi-row">
             <div className="kpi-card">
               <div className="kpi-icon-box" style={{ background: '#f1f5f9', color: '#0f172a' }}>
@@ -362,7 +438,7 @@ export default function App() {
               </div>
               <div>
                 <div className="kpi-val">{stats.total}</div>
-                <div className="kpi-label">Glosas Apontadas</div>
+                <div className="kpi-label">Total Apontadas</div>
               </div>
             </div>
 
@@ -407,6 +483,49 @@ export default function App() {
             </div>
           </div>
 
+          {/* Abas Primárias de Fluxo (Fila de Trabalho vs Concluídas) e Ação em Lote */}
+          <div className="queue-tabs-row">
+            <div className="queue-nav-group">
+              <button 
+                className={`queue-tab-btn ${queueTab === 'pending' ? 'active' : ''}`}
+                onClick={() => setQueueTab('pending')}
+              >
+                <ListTodo size={16} />
+                <span>Fila de Pendências</span>
+                <span className="queue-tab-count">{stats.pendingCount}</span>
+              </button>
+
+              <button 
+                className={`queue-tab-btn ${queueTab === 'completed' ? 'active' : ''}`}
+                onClick={() => setQueueTab('completed')}
+              >
+                <CheckCircle2 size={16} />
+                <span>Concluídas</span>
+                <span className="queue-tab-count">{stats.completedCount}</span>
+              </button>
+
+              <button 
+                className={`queue-tab-btn ${queueTab === 'all' ? 'active' : ''}`}
+                onClick={() => setQueueTab('all')}
+              >
+                <span>Todas as Corridas</span>
+                <span className="queue-tab-count">{stats.total}</span>
+              </button>
+            </div>
+
+            {/* Ação Rápida em Lote */}
+            {stats.readyStrongPendingCount > 0 && queueTab === 'pending' && (
+              <button 
+                className="btn-bulk-approve"
+                onClick={handleBulkApproveStrong}
+                title="Aprova e arquiva todas as corridas que já estão com justificativas fortes e aprovadas"
+              >
+                <Zap size={15} />
+                <span>Aprovar e Arquivar Prontas em Lote ({stats.readyStrongPendingCount})</span>
+              </button>
+            )}
+          </div>
+
           {/* Barra de Filtros e Busca */}
           <div className="controls-bar">
             <div className="filter-group">
@@ -414,7 +533,7 @@ export default function App() {
                 className={`filter-chip ${activeFilter === 'all' ? 'active' : ''}`}
                 onClick={() => setActiveFilter('all')}
               >
-                Todas ({stats.total})
+                Todos os Filtros
               </button>
 
               <button 
@@ -467,6 +586,27 @@ export default function App() {
             </div>
           </div>
 
+          {/* Estado Inbox Zero (Quando todas as pendências foram concluídas) */}
+          {queueTab === 'pending' && filteredRides.length === 0 && stats.total > 0 && (
+            <div className="inbox-zero-box">
+              <div className="inbox-zero-icon">
+                <CheckCircle2 size={32} />
+              </div>
+              <div className="inbox-zero-title">Fila de Pendências Zerada! 🎉</div>
+              <p className="inbox-zero-subtitle">
+                Todas as corridas apontadas nesta medição foram analisadas, justificadas e aprovadas com sucesso.
+              </p>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '6px' }}>
+                <button className="btn btn-primary" onClick={handleExport}>
+                  <Download size={16} /> Exportar Planilha Respondida (.xlsx)
+                </button>
+                <button className="btn btn-secondary" onClick={() => setQueueTab('completed')}>
+                  Ver Corridas Concluídas ({stats.completedCount})
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Lista de Corridas (Cards Fluidos com Grid Interno B2B) */}
           <div className="cards-list">
             {filteredRides.map(ride => {
@@ -511,6 +651,12 @@ export default function App() {
                         {ride.isAutoFilled && (
                           <span className="badge-pill" style={{ background: '#f0fdfa', color: '#0d9488', border: '1px solid #99f6e4' }}>
                             <Sparkles size={11} /> TX20
+                          </span>
+                        )}
+
+                        {ride.isCompleted && (
+                          <span className="badge-pill" style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}>
+                            <Check size={11} /> Concluída
                           </span>
                         )}
                       </div>
@@ -615,7 +761,7 @@ export default function App() {
                         />
                       </div>
 
-                      {/* Linha de Atalhos, Botão IA e Status de Pagamento */}
+                      {/* Linha de Atalhos, Botão IA e Validação */}
                       <div className="bottom-controls-row">
                         <div className="presets-group">
                           <button 
@@ -679,21 +825,26 @@ export default function App() {
                             )}
                           </button>
 
-                          <button 
-                            className={ride.pagamento === 'LIBERADO PAGAMENTO' ? 'btn-status-pago' : 'btn-status-analise'}
-                            onClick={() => handleTogglePagamento(ride.id)}
-                            title="Alternar status de pagamento"
-                          >
-                            {ride.pagamento === 'LIBERADO PAGAMENTO' ? (
-                              <>
-                                <Check size={13} /> Liberado Pagamento
-                              </>
-                            ) : (
-                              <>
-                                <AlertTriangle size={13} /> {ride.pagamento}
-                              </>
-                            )}
-                          </button>
+                          {/* Botão de Validação / Conclusão (Remove da Fila de Trabalho) */}
+                          {!ride.isCompleted ? (
+                            <button 
+                              className="btn-approve-complete"
+                              onClick={() => handleToggleComplete(ride.id)}
+                              title="Valida a corrida, marca liberado pagamento e remove da fila ativa de pendências"
+                            >
+                              <CheckCircle2 size={15} />
+                              <span>Concluir</span>
+                            </button>
+                          ) : (
+                            <button 
+                              className="btn-reopen-complete"
+                              onClick={() => handleToggleComplete(ride.id)}
+                              title="Reabrir esta corrida e trazê-la de volta para a fila de pendências"
+                            >
+                              <RotateCcw size={14} />
+                              <span>Reabrir</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>

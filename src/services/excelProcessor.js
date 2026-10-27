@@ -171,7 +171,8 @@ export function parseMedicaoWorkbook(arrayBuffer, tx20Map = null) {
         currentJustification: suggestedJust,
         pagamento: statusPagamento || 'LIBERADO PAGAMENTO',
         isAutoFilled,
-        isCancelled
+        isCancelled,
+        isCompleted: false
       };
 
       // Avaliação de Qualidade e Alertas
@@ -256,7 +257,8 @@ export function parseMedicaoWorkbook(arrayBuffer, tx20Map = null) {
         currentJustification: suggestedJust,
         pagamento: statusPagamento || 'LIBERADO PAGAMENTO',
         isAutoFilled,
-        isCancelled
+        isCancelled,
+        isCompleted: false
       };
 
       rideObj.quality = evaluateJustificationQuality(rideObj.currentJustification);
