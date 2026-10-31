@@ -1,5 +1,5 @@
-import { constantTimeEqual, sendJson } from '../_lib/auth';
-import { ensureSchema, getSql, type SqlClient } from '../_lib/db';
+import { constantTimeEqual, sendJson } from '../_lib/auth.js';
+import { ensureSchema, getSql, type SqlClient } from '../_lib/db.js';
 
 /**
  * Job Diário (Vercel Cron):

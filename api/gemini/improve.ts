@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { requireAuth, sendJson } from '../_lib/auth';
+import { requireAuth, sendJson } from '../_lib/auth.js';
 
 const ImproveRequestSchema = z.object({
   voucher: z.string().optional().default(''),

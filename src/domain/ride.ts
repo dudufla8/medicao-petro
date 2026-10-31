@@ -9,7 +9,7 @@ import {
   TdDetailsDataSchema,
   TdReportItemSchema,
   TdWebhookPayloadSchema
-} from './parsers';
+} from './parsers.js';
 
 export type RideAuditStatus =
   | 'nova'

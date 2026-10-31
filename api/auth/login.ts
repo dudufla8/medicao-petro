@@ -5,8 +5,8 @@ import {
   createSessionToken,
   getClientIpHash,
   sendJson
-} from '../_lib/auth';
-import { ensureSchema, getSql, type SqlClient } from '../_lib/db';
+} from '../_lib/auth.js';
+import { ensureSchema, getSql, type SqlClient } from '../_lib/db.js';
 
 const LoginBodySchema = z.object({
   password: z.string().min(1),

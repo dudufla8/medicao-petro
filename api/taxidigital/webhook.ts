@@ -2,10 +2,10 @@ import crypto from 'node:crypto';
 import {
   sanitizeWebhookPayload,
   TdWebhookPayloadSchema
-} from '../../src/domain/parsers';
-import { adaptWebhookCompletedToFinalData } from '../../src/domain/ride';
-import { constantTimeEqual, sendJson } from '../_lib/auth';
-import { ensureSchema, getSql, type SqlClient } from '../_lib/db';
+} from '../../src/domain/parsers.js';
+import { adaptWebhookCompletedToFinalData } from '../../src/domain/ride.js';
+import { constantTimeEqual, sendJson } from '../_lib/auth.js';
+import { ensureSchema, getSql, type SqlClient } from '../_lib/db.js';
 
 async function readRawBody(req: any): Promise<string> {
   if (typeof req.rawBody === 'string') {

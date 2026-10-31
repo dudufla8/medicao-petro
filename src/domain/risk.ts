@@ -1,5 +1,5 @@
-import { parseStoppedTimeToSeconds } from './parsers';
-import type { DriverNoteSource } from './ride';
+import { parseStoppedTimeToSeconds } from './parsers.js';
+import type { DriverNoteSource } from './ride.js';
 
 export interface RiskThresholds {
   kmDiffPercent: number; // padrão: 0.40 (40%)

@@ -1,5 +1,5 @@
-import { requireAuth, sendJson } from '../_lib/auth';
-import { ensureSchema, getSql, type SqlClient } from '../_lib/db';
+import { requireAuth, sendJson } from '../_lib/auth.js';
+import { ensureSchema, getSql, type SqlClient } from '../_lib/db.js';
 
 export async function handleWebhookEventsRequest(
   req: any,
