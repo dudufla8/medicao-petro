@@ -1,78 +1,91 @@
 # 🚖 Táxi 2.0 | Medição & Conciliação Petrobras
-> Aplicação Web de apoio à medição e conciliação de glosas para o Contrato Petrobras SAP: **4600686169**.
+> Aplicação Web e API Serverless de auditoria diária, medição e conciliação de glosas para o Contrato Petrobras SAP: **4600686169**.
+
+---
+
+## 🌐 Arquitetura de Produção (WordPress + Vercel + Neon Postgres)
+
+- **URL Operacional (WordPress protegido por senha):** `https://taxidoispontozero.com.br/medicao-petro/`
+- **Aplicação e API Serverless (Vercel):** `https://medicao-petro.vercel.app` (exibida via `<iframe>` dentro da página protegida do WordPress)
+- **Endpoint do Webhook Táxi Digital:** `https://medicao-petro.vercel.app/api/taxidigital/webhook`
+- **Sessão em Iframe Cross-Origin:** Autenticação com nome do operador + senha (`APP_ACCESS_PASSWORD`), protegida por rate-limit por IP no banco e token HMAC-SHA256 (`SESSION_SECRET`) trafegado via Cookie (`HttpOnly; Secure; SameSite=None; Partitioned`) **e** header `Authorization: Bearer` (garantindo funcionamento em qualquer navegador dentro do iframe do WordPress).
+- **Segurança de Frame (`vercel.json`):** Header `Content-Security-Policy: frame-ancestors 'self' https://taxidoispontozero.com.br https://www.taxidoispontozero.com.br;` sem `X-Frame-Options` conflitante.
 
 ---
 
 ## ⚡ Recursos Principais
 
-1. **Cruzamento Automático com o Sistema TX20:**
-   - Lê a planilha mestre operacional (`sistema tx20...xlsx`).
-   - Associa instantaneamente por `No.Chamado` (QRU) e `eVoucher`.
-   - Preenche automaticamente a coluna **`Justificativa da Empresa`** a partir da **Coluna CI** (`JUSTIFICATIVAS e Infos da QRU`).
-   - Identifica registros de cancelamento na **Coluna AY** (`Obs.Moto`) e aplica a contestação padrão de cancelamento sem desconto.
-   - Define o status de pagamento como **`LIBERADO PAGAMENTO`**.
+1. **Webhook Táxi Digital & Persistência (Neon Postgres):**
+   - Recebe eventos de troca de status em `POST /api/taxidigital/webhook` validados em tempo constante via header `X-Webhook-Secret`.
+   - Ignora e descarta eventos `type="position"` sem gravar coordenadas de localização (conformidade LGPD).
+   - Registra eventos `type="status"` de forma idempotente (hash SHA-256) em `webhook_events` e consolida valores finais (`amount`, `stopped_time`, `stopped_time_value`, `toll_value`, `parking_value`, `discount_value`, `driver_comment`, `km`) em `ride_final_data` no status `completed` (`5`), sobrescrevendo apenas se `received_at` for mais recente.
+   - Expurgo automático diário (`/api/cron/purge-webhooks`) apenas do payload bruto de `webhook_events` após `WEBHOOK_RETENTION_DAYS` (padrão 180 dias), preservando `ride_final_data`, `justifications` e `audit_log`.
 
-2. **Motor de Análise de Qualidade de Justificativas:**
+2. **Cruzamento Automático com o Sistema TX20:**
+   - Lê a planilha mestre operacional (`sistema tx20...xlsx`).
+   - Associa por `No.Chamado` (QRU) e `eVoucher`.
+   - Prioridade da anotação do motorista: **Justificativa aprovada > `driver_comment` (Webhook) > Planilha TX20 (Coluna CI)**.
+   - Identifica registros de cancelamento na **Coluna AY** (`Obs.Moto`) e aplica a contestação padrão de cancelamento sem desconto.
+
+3. **Motor de Análise de Qualidade de Justificativas:**
    - 🔴 **Fraca / Incompleta:** Detecta clichês genéricos (*"trajeto mais curto"*, *"pedido do cliente"*, textos < 25 chars) que os analistas rejeitam.
    - 🟡 **Média:** Apresenta motivo, mas carece de especificação de vias ou portarias.
    - 🟢 **Forte (Padrão Petrobras):** Contém vias específicas (BRs, anéis viários, rodovias, avenidas arteriais) ou portarias/postos de vigilância (PVs) + motivo plausível.
 
-3. **Radar de Risco (⚠️ Requer Análise Manual no TX20):**
-   - Alerta visual destacado sempre que houver:
-     - Diferença de KM > 40% ou > 10 km a mais.
-     - Corrida acima de 90 km.
-     - Hora parada elevada (> 30 min ou > R$ 30).
-     - Desembarque ou embarque em local divergente do chamado oficial.
-     - Corrida de alto valor financeiro (> R$ 300).
-     - Ausência de anotação do motorista.
+4. **Radar de Risco Configurável (⚠️ Requer Análise Manual):**
+   - Diferença de KM > 40% ou > 10 km a mais.
+   - Corrida acima de 90 km.
+   - Hora parada elevada (> 30 min ou > R$ 30).
+   - Desembarque ou embarque em local divergente do chamado oficial.
+   - Corrida de alto valor financeiro (> R$ 300).
+   - Ausência de anotação do motorista (não dispara falso positivo quando a corrida não possui evento de webhook e está marcada como *anotação indisponível via API*).
 
-4. **Inteligência Artificial (Google Gemini Integrado):**
+5. **Inteligência Artificial no Backend (`/api/gemini/improve`):**
    - Botão **"✨ Melhorar com IA (Gemini)"** em cada cartão.
-   - Reescreve o relato do motorista em linguagem técnica, formal e contratual Petrobras com 1 clique.
-   - Usa o modelo **`gemini-3-flash-preview`** (chave configurável).
+   - A chave `GEMINI_API_KEY` fica exclusivamente no servidor (Vercel), nunca exposta no navegador.
 
-5. **Atalhos Rápidos de 1 Clique (Presets):**
-   - 🚗 **Trânsito / GPS:** Desvio por lentidão severa sugerido pelo GPS.
-   - 👤 **Pedido do Passageiro:** Alteração de trajeto solicitada pelo usuário.
-   - 🏢 **Portaria / PV:** Desembarque realizado em portaria ou posto de vigilância.
-   - ❌ **Cancelada (Não Faturada):** Contestação padrão de cancelamento.
-   - 🛣️ **Pedágio Contratual:** Justificativa de pedágio intermunicipal.
-
-6. **Exportação Segura para Excel (.xlsx):**
+6. **Exportação Segura para Excel (`.xlsx` com SheetJS `0.20.3`):**
    - Atualiza as abas `justificativas MOBICITY` e `justificativas Simcorpi`.
-   - **Preserva 100% das fórmulas** originais (como `XLOOKUP`, `% KM`, `% Valor`, etc.) e layouts.
+   - **Preserva 100% das fórmulas** originais (`XLOOKUP`, `% KM`, `% Valor`, etc.) e layouts.
 
 ---
 
-## 🚀 Como Executar Localmente
+## 🔐 Variáveis de Ambiente (`.env.example`)
 
-### Opção 1: Atalho de 1 Clique no Windows
-Basta dar dois cliques no arquivo:
-```
-iniciar-app.bat
-```
-Ele abrirá automaticamente o navegador em `http://localhost:5173/`.
+Configure na Vercel (**Settings → Environment Variables**) — nunca versione valores reais:
 
-### Opção 2: Terminal
+| Variável | Descrição |
+| :--- | :--- |
+| `DATABASE_URL` | String de conexão do banco **Neon Postgres** exclusivo do projeto (Storage na Vercel). |
+| `APP_ACCESS_PASSWORD` | Senha de acesso operacional ao app. |
+| `SESSION_SECRET` | Segredo aleatório para assinatura HMAC-SHA256 dos tokens de sessão (separado de `APP_ACCESS_PASSWORD`). |
+| `WEBHOOK_SECRET` | Segredo validado no header `X-Webhook-Secret` do endpoint `/api/taxidigital/webhook`. |
+| `WEBHOOK_URL` | `https://medicao-petro.vercel.app/api/taxidigital/webhook` (usado pelo script local `npm run test:webhook`). |
+| `CRON_SECRET` | Segredo usado pela Vercel para autenticar o Cron diário `/api/cron/purge-webhooks`. |
+| `WEBHOOK_RETENTION_DAYS` | Dias de retenção do payload bruto de `webhook_events` (padrão `180`). |
+| `GEMINI_API_KEY` | Chave da API Google Gemini (exclusiva do backend). |
+| `GEMINI_MODEL` | Modelo Gemini no backend (padrão `gemini-2.5-flash`). |
+| `TD_USER` | Usuário Basic Auth da API Táxi Digital. |
+| `TD_PASS` | Senha Basic Auth da API Táxi Digital. |
+| `TD_CLIENT_IDS` | Opcional — usar apenas se o diagnóstico do Checkpoint C comprovar necessidade de `X-uiCliente`. |
+
+---
+
+## 🚀 Como Executar e Testar
+
 ```bash
-cd app-medicao-ui
+# Instalar dependências
 npm install
-npm run dev
+
+# Rodar suíte de testes unitários (Vitest)
+npm test
+
+# Validar tipagem TypeScript
+npx tsc --noEmit
+
+# Gerar build de produção
+npm run build
+
+# Testar o webhook (contra produção na Vercel ou ambiente local)
+npm run test:webhook
 ```
-
----
-
-## ☁️ Como Publicar no Vercel (Conectado ao seu GitHub)
-
-1. Crie um novo repositório no seu GitHub (ex: `medicao-petro`).
-2. No terminal, dentro da pasta `app-medicao-ui`, rode:
-   ```bash
-   git remote add origin https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git
-   git push -u origin main
-   ```
-3. Acesse [vercel.com](https://vercel.com) e clique em **"Add New Project"**.
-4. Selecione o repositório que você acabou de subir.
-5. Em **Framework Preset**, o Vercel detectará automaticamente **Vite**.
-6. Clique em **Deploy**!
-7. Nas configurações de domínio do Vercel (**Domains**), aponte para:
-   - `medicao.taxidoispontozero.com.br` ou configure o proxy reverso para `taxidoispontozero.com.br/medicao-petro/`.
