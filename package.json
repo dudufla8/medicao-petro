@@ -7,19 +7,28 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:webhook": "node scripts/test-webhook.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
     "lucide-react": "^1.62.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@vercel/node": "^29.0.0",
     "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "^1.89.0",
-    "vite": "^8.3.5"
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }
