@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   FileSpreadsheet, 
   Upload, 
@@ -20,13 +20,24 @@ import {
   ListTodo,
   CheckCheck,
   Zap,
-  ArrowRight
+  ArrowRight,
+  Activity,
+  LogOut
 } from 'lucide-react';
 import { parseSistemaTX20, parseMedicaoWorkbook, exportUpdatedWorkbook } from './services/excelProcessor';
 import { evaluateJustificationQuality } from './services/analyzer';
 import { generateGeminiJustification } from './services/gemini';
+import { checkSession, logoutSession, getStoredOperatorName } from './services/apiClient';
+import { LoginScreen } from './ui/LoginScreen';
+import { WebhookEventsModal } from './ui/WebhookEventsModal';
 
 export default function App() {
+  // Estados de Autenticação e Sessão
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [operatorName, setOperatorName] = useState(() => getStoredOperatorName() || '');
+  const [webhookModalOpen, setWebhookModalOpen] = useState(false);
+
   // Estados de Arquivos
   const [tx20Map, setTx20Map] = useState(null);
   const [tx20FileName, setTx20FileName] = useState('');
@@ -41,12 +52,26 @@ export default function App() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || import.meta.env.VITE_GEMINI_API_KEY || '');
   const [aiGeneratingId, setAiGeneratingId] = useState(null);
   const [copiedVoucher, setCopiedVoucher] = useState(null);
 
   const fileInputRefMedicao = useRef(null);
   const fileInputRefTx20 = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    checkSession().then(info => {
+      if (!active) return;
+      setIsAuthenticated(info.authenticated);
+      if (info.operatorName) {
+        setOperatorName(info.operatorName);
+      }
+      setAuthChecked(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Copiar número do voucher para a área de transferência
   const handleCopyVoucher = (voucherText) => {
@@ -58,9 +83,10 @@ export default function App() {
     }, 2000);
   };
 
-  const handleSaveApiKey = (key) => {
-    setGeminiApiKey(key);
-    localStorage.setItem('GEMINI_API_KEY', key);
+  const handleLogout = async () => {
+    await logoutSession();
+    setIsAuthenticated(false);
+    setOperatorName('');
   };
 
   // Carregamento do arquivo TX20
@@ -209,15 +235,15 @@ export default function App() {
     }
   };
 
-  // Chamada de IA Gemini com Regras Estritas Anti-Alucinação
+  // Chamada de IA Gemini via Backend (/api/gemini/improve) com Regras Estritas Anti-Alucinação
   const handleAiEnrich = async (ride) => {
     setAiGeneratingId(ride.id);
     try {
-      const generated = await generateGeminiJustification(ride, geminiApiKey);
+      const generated = await generateGeminiJustification(ride);
       handleUpdateJustification(ride.id, generated);
     } catch (err) {
       console.error(err);
-      alert('Erro na IA Gemini: ' + (err.message || 'Verifique a chave da API nas configurações.'));
+      alert('Erro na IA Gemini: ' + (err.message || 'Falha ao consultar a rota /api/gemini/improve.'));
     } finally {
       setAiGeneratingId(null);
     }
@@ -289,6 +315,26 @@ export default function App() {
     });
   }, [rides, queueTab, activeFilter, searchQuery]);
 
+  if (!authChecked) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', color: '#475569', gap: '10px' }}>
+        <RefreshCw size={18} className="animate-spin" />
+        <span>Verificando sessão segura...</span>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <LoginScreen
+        onLoginSuccess={(name) => {
+          setOperatorName(name);
+          setIsAuthenticated(true);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="app-container">
       {/* Header Superior Corporativo B2B */}
@@ -299,15 +345,27 @@ export default function App() {
             <h1>
               Táxi 2.0 <span className="brand-badge">Petrobras • Medição B2B</span>
             </h1>
-            <p>Auditoria operacional de corridas, conciliação de glosas e validação de rotas</p>
+            <p>
+              Auditoria operacional de corridas, conciliação de glosas e validação de rotas
+              {operatorName ? ` • Operador: ${operatorName}` : ''}
+            </p>
           </div>
         </div>
 
         <div className="header-actions">
+          <button
+            className="btn btn-secondary"
+            onClick={() => setWebhookModalOpen(true)}
+            title="Monitorar eventos recebidos via Webhook da Táxi Digital"
+          >
+            <Activity size={18} />
+            <span>Eventos do Webhook</span>
+          </button>
+
           <button 
             className="btn btn-secondary" 
             onClick={() => setSettingsOpen(true)}
-            title="Configurações e Chaves de API"
+            title="Configurações do Sistema"
           >
             <Settings size={18} />
             <span>Configurações</span>
@@ -321,6 +379,14 @@ export default function App() {
           >
             <Download size={18} />
             <span>Exportar Planilha Respondida</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={handleLogout}
+            title="Encerrar sessão"
+          >
+            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -857,6 +923,12 @@ export default function App() {
         </>
       )}
 
+      {/* Modal de Eventos do Webhook */}
+      <WebhookEventsModal
+        open={webhookModalOpen}
+        onClose={() => setWebhookModalOpen(false)}
+      />
+
       {/* Modal de Configurações */}
       {settingsOpen && (
         <div className="modal-overlay" onClick={() => setSettingsOpen(false)}>
@@ -869,16 +941,9 @@ export default function App() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Chave de API do Google Gemini</label>
-              <input 
-                type="password" 
-                className="form-control"
-                value={geminiApiKey}
-                onChange={e => handleSaveApiKey(e.target.value)}
-                placeholder="Insira sua chave do Google AI Studio..."
-              />
-              <p className="form-hint">
-                Configurada com regras estritas anti-alucinação baseadas na telemetria real da corrida.
+              <label className="form-label">Segurança e Integrações de Servidor</label>
+              <p className="form-hint" style={{ marginTop: 0 }}>
+                As credenciais da API Táxi Digital, Webhook e Google Gemini são gerenciadas exclusivamente no servidor (variáveis de ambiente da Vercel), sem exposição no navegador.
               </p>
             </div>
 
@@ -894,13 +959,14 @@ export default function App() {
               }}>
                 <div><strong>Contrato SAP:</strong> 4600686169</div>
                 <div><strong>Contratada:</strong> JESSICA BELLO DA SILVA - TAXI 2.0</div>
+                <div><strong>Operador Autenticado:</strong> {operatorName || 'Operador'}</div>
                 <div><strong>Destino do Deploy:</strong> https://taxidoispontozero.com.br/medicao-petro/</div>
               </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
               <button className="btn btn-primary" onClick={() => setSettingsOpen(false)}>
-                Salvar e Fechar
+                Fechar
               </button>
             </div>
           </div>
