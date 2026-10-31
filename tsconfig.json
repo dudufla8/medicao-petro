@@ -19,6 +19,7 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
+    "types": ["node"],
     "noEmit": true
   },
   "include": ["src", "api", "scripts"]

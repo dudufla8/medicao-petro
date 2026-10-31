@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as XLSX from 'xlsx';
 import {
   formatSecondsToHMS,
   formatTdRequestDate,
@@ -73,5 +74,25 @@ describe('Armadilhas de Parsing - Datas, Números e Sanitização LGPD', () => {
     expect(clean.longitude).toBeUndefined();
     expect(clean.init_lat).toBeUndefined();
     expect(clean.phone_number).toBeUndefined();
+  });
+
+  it('preserva fórmulas XLOOKUP, % KM e % Valor após atualização com SheetJS 0.20.3', () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['eVoucher', 'KM Real', 'KM Orçado', '% KM', 'Justificativa da Empresa', 'PAGAMENTO'],
+      ['41976288', 25, 15, null, '', 'LIBERADO PAGAMENTO']
+    ]);
+    ws['D2'] = { t: 'n', f: '(B2-C2)/C2', v: 0.6667 };
+    ws['E2'] = { t: 's', f: '_xlfn.XLOOKUP(A2,Base!A:A,Base!B:B,"")', v: '' };
+    XLSX.utils.book_append_sheet(wb, ws, 'justificativas MOBICITY');
+
+    // Simula escrita de justificativa preservando a fórmula de % KM em D2
+    wb.Sheets['justificativas MOBICITY']['E2'] = { t: 's', v: 'Desvio pela BR-101 devido a interdição.' };
+    const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const reloaded = XLSX.read(out, { type: 'array', cellFormula: true });
+
+    expect(XLSX.version).toBe('0.20.3');
+    expect(reloaded.Sheets['justificativas MOBICITY']['D2'].f).toBe('(B2-C2)/C2');
+    expect(reloaded.Sheets['justificativas MOBICITY']['E2'].v).toBe('Desvio pela BR-101 devido a interdição.');
   });
 });
